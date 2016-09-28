@@ -4,8 +4,9 @@ import (
     "fmt";
     "flag";
     "os";
-    //"net/http";
+    "net/http";
     "net/url";
+    "io/ioutil";
     //"strings"
 )
 
@@ -15,55 +16,69 @@ func (e ParamError) Error() string {
     return string(e)
 }
 
-var baseUrl, _ = url.Parse("https://api.nexmo.com")
+var baseUrlPtr, _ = url.Parse("https://api.nexmo.com")
+var baseUrl = *baseUrlPtr
 
 func main() {
-    if len(os.Args) <= 1 {
-        fmt.Println("Expecting action as first argument")
-        os.Exit(1)
-    }
-
-    action := os.Args[1]
-
-    apiKey, key_err := parseParameter("apiKey", "NEXMO_API_KEY", "Nexmo API Key")
-
-    if len(key_err) != 0 {
-        fmt.Println("Failed to get Nexmo API Key: ", key_err)
-        os.Exit(1)
-    }
-
-    apiSecret, sec_err := parseParameter("apiSecret", "NEXMO_API_SECRET", "Nexmo API Secret")
-    if len(sec_err) != 0 {
-        fmt.Println("Failed to get Nexmo API Secret: " + sec_err)
-        os.Exit(1)
+    action, apiKey, apiSecret, err := parseCommandArgs()
+    if len(err) != 0 {
+        fmt.Println("Not all required arguments were found: ", err)
+        os.Exit(2)
     }
 
     executeAction(action, apiKey, apiSecret)
 }
 
-func parseParameter(cmd_flag string, env_var string, description string) (param, err string) {
-    flag.StringVar(&param, cmd_flag, "", description)
+func parseCommandArgs() (action, apiKey, apiSecret string, err ParamError) {
+    flag.StringVar(&apiKey, "apiKey", os.Getenv("NEXMO_API_KEY"), "Nexmo API Key")
+    flag.StringVar(&apiSecret, "apiSecret", os.Getenv("NEXMO_API_SECRET"), "Nexmo API Secret")
+    flag.StringVar(&action, "action", "", "Action to execute")
+    flag.Parse()
 
-    if len(param) == 0 {
-        param = os.Getenv(env_var)
+    if len(apiKey) == 0 {
+        err = "Could not find api key in parameter '-apiKey' or environment variable NEXMO_API_KEY"
+        return
+    }
 
-        if len(param) == 0 {
-            err = "Could not find " + description + " in -" + cmd_flag + " parameter or " + env_var + " environment variable"
-            return
-        }
+    if len(apiSecret) == 0 {
+        err = "Could not find api secret in parameter '-apiSecret' or environment variable NEXMO_API_SECRET"
+        return
+    }
+
+    if len(action) == 0 {
+        err = "No action provided."
     }
 
     return
 }
 
-func executeAction(action, apiKey, apiSecret string) {
+func executeAction(action, apiKey, apiSecret string) bool {
     switch action {
     case "list-applications":
-        fmt.Println("will do list-applications")
-        os.Exit(0)
+        applicationUrl := baseUrl
+        applicationUrl.Path = "v1/applications"
+        v := url.Values{}
+        v.Add("api_key", apiKey)
+        v.Add("api_secret", apiSecret)
+        applicationUrl.RawQuery = v.Encode()
+        fmt.Println(baseUrl.String(), applicationUrl.String())
+        resp, err := http.Get(applicationUrl.String())
+        if err != nil {
+            fmt.Println("Failed to list applications: ", err)
+            return false
+        }
+
+        bytes, err := ioutil.ReadAll(resp.Body)
+        if err != nil {
+            fmt.Println("Failed to read body of request: ", err)
+            return false
+        }
+
+        fmt.Println(string(bytes))
 
     default:
-        fmt.Println("you said nothing interesting bye")
-        os.Exit(2)
+        fmt.Println("Unknown action", action)
     }
+
+    return false
 }
