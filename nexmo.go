@@ -37,7 +37,7 @@ var baseUrlPtr, _ = url.Parse("https://api.nexmo.com")
 var baseUrl = *baseUrlPtr
 
 func main() {
-    action, apiKey, apiSecret, err := parseCommandArgs()
+    action, apiKey, apiSecret, args, err := parseCommandArgs()
     if len(err) != 0 {
         fmt.Println("Not all required arguments were found: ", err)
         os.Exit(2)
@@ -48,14 +48,24 @@ func main() {
     v.Add("api_secret", apiSecret)
     baseUrl.RawQuery = v.Encode()
 
-    executeAction(action, apiKey, apiSecret)
+    executeAction(action, apiKey, apiSecret, args)
 }
 
-func parseCommandArgs() (action, apiKey, apiSecret string, err ParamError) {
+func parseCommandArgs() (action, apiKey, apiSecret string, moreArgs map[string]string, err ParamError) {
+    moreArgs = map[string]string{}
     flag.StringVar(&apiKey, "apiKey", os.Getenv("NEXMO_API_KEY"), "Nexmo API Key")
     flag.StringVar(&apiSecret, "apiSecret", os.Getenv("NEXMO_API_SECRET"), "Nexmo API Secret")
     flag.StringVar(&action, "action", "", "Action to execute")
+
+    namePtr := flag.String("name", "", "Name of application")
+    typePtr := flag.String("type", "", "Type of application")
+    eventUrlPtr := flag.String("eventUrl", "", "Event URL for application")
+
     flag.Parse()
+
+    moreArgs["name"] = *namePtr
+    moreArgs["type"] = *typePtr
+    moreArgs["eventUrl"] = *eventUrlPtr
 
     if len(apiKey) == 0 {
         err = "Could not find api key in parameter '-apiKey' or environment variable NEXMO_API_KEY"
@@ -74,10 +84,13 @@ func parseCommandArgs() (action, apiKey, apiSecret string, err ParamError) {
     return
 }
 
-func executeAction(action, apiKey, apiSecret string) bool {
+func executeAction(action, apiKey, apiSecret string, args map[string]string) bool {
     switch action {
     case "list-applications":
         return listApplications()
+
+    case "create-application":
+        return createApplication(args)
 
     default:
         fmt.Println("Unknown action", action)
@@ -86,11 +99,58 @@ func executeAction(action, apiKey, apiSecret string) bool {
     return false
 }
 
+func createApplication(args map[string]string) bool {
+    appName := args["name"]
+    if len(appName) == 0 {
+        fmt.Println("Expected 'name' argument")
+        return false
+    }
+
+    appType := args["type"]
+    if len(appType) == 0 {
+        fmt.Println("Expected 'type' argument")
+        return false
+    }
+
+    eventUrl := args["eventUrl"]
+    if len(eventUrl) == 0 {
+        fmt.Println("Expected 'eventUrl' argument")
+        return false
+    }
+
+    applicationUrl := baseUrl
+    applicationUrl.Path = "v1/applications"
+
+    v := applicationUrl.Query()
+    v.Add("name", appName)
+    v.Add("type", appType)
+    v.Add("event_url", eventUrl)
+
+    applicationUrl.RawQuery = v.Encode()
+
+    resp, err := http.Post(applicationUrl.String(), "text/plain", nil)
+
+    if err != nil {
+        fmt.Println("Failed to create new application: ", err)
+        return false
+    }
+
+    bytes, err := ioutil.ReadAll(resp.Body)
+
+    if err != nil {
+        fmt.Println("Failed to read response body: ", err)
+        return false
+    }
+
+    fmt.Println(string(bytes))
+
+    return true
+}
+
 func listApplications() bool {
     applicationUrl := baseUrl
     applicationUrl.Path = "v1/applications"
 
-    fmt.Println(baseUrl.String(), applicationUrl.String())
     resp, err := http.Get(applicationUrl.String())
     if err != nil {
         fmt.Println("Failed to list applications: ", err)
